@@ -1,5 +1,6 @@
 import streamlit as st
-import requests
+import yfinance as yf
+import pandas as pd
 from datetime import datetime
 
 st.set_page_config(page_title="Market Detective", page_icon="🕵️‍♂️", layout="centered")
@@ -26,7 +27,6 @@ st.markdown("""
     .score-red { background-color: #ef4444; }
     .no-results { text-align: center; color: #94a3b8; padding: 40px 20px; }
     .disclaimer { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 30px; line-height: 1.5; }
-    .refresh-btn { background-color: #3b82f6; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; width: 100%; cursor: pointer; margin-bottom: 15px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,40 +44,73 @@ STOCK_UNIVERSE = [
 ]
 
 @st.cache_data(ttl=300)
-def fetch_live_data(tickers):
+def fetch_live_data_yfinance(tickers):
+    """Fetch data using yfinance library"""
     results = []
-    for i in range(0, len(tickers), 10):
-        batch = tickers[i:i+10]
-        symbols = ",".join(batch)
-        try:
-            url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbols}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if 'quoteResponse' in data and 'result' in data['quoteResponse']:
-                    for stock in data['quoteResponse']['result']:
-                        try:
-                            name = stock.get('symbol', '').replace('.NS', '')
-                            price = stock.get('regularMarketPrice', 0)
-                            prev_close = stock.get('regularMarketPreviousClose', price)
-                            change = stock.get('regularMarketChangePercent', 0)
-                            volume = stock.get('regularMarketVolume', 0)
-                            avg_volume = stock.get('averageDailyVolume3Month', volume)
-                            high_52w = stock.get('fiftyTwoWeekHigh', price)
-                            vol_ratio = volume / avg_volume if avg_volume > 0 else 1.0
-                            drop_52w = ((price - high_52w) / high_52w * 100) if high_52w > 0 else 0
-                            rsi = 50 + (change * 3)
-                            rsi = max(0, min(100, rsi))
-                            results.append({
-                                'name': name, 'price': price, 'change': change,
-                                'rsi': rsi, 'vol_ratio': vol_ratio,
-                                'high_52w': high_52w, 'drop_52w': drop_52w
-                            })
-                        except:
-                            continue
-        except:
-            continue
+    try:
+        # Fetch all stocks at once
+        data = yf.download(tickers, period="3mo", group_by='ticker', progress=False)
+        
+        for ticker in tickers:
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                
+                if not info or 'currentPrice' not in info:
+                    continue
+                
+                current_price = info.get('currentPrice', 0)
+                prev_close = info.get('previousClose', current_price)
+                change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
+                
+                # Get historical data for RSI
+                hist = stock.history(period="3mo")
+                if hist.empty:
+                    continue
+                
+                closes = hist['Close'].tolist()
+                
+                # Calculate RSI
+                rsi = 50
+                if len(closes) >= 15:
+                    gains, losses = 0, 0
+                    for i in range(-14, 0):
+                        if i-1 >= -len(closes):
+                            diff = closes[i] - closes[i-1]
+                            if diff > 0: gains += diff
+                            else: losses -= diff
+                    avg_gain = gains / 14
+                    avg_loss = losses / 14
+                    if avg_loss > 0:
+                        rs = avg_gain / avg_loss
+                        rsi = 100 - (100 / (1 + rs))
+                
+                # Volume analysis
+                volumes = hist['Volume'].tolist()
+                avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
+                current_vol = volumes[-1] if volumes else 0
+                vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
+                
+                # 52 Week High
+                high_52w = info.get('fiftyTwoWeekHigh', max(closes) if closes else current_price)
+                drop_52w = ((current_price - high_52w) / high_52w * 100) if high_52w > 0 else 0
+                
+                name = ticker.replace('.NS', '')
+                
+                results.append({
+                    'name': name,
+                    'price': current_price,
+                    'change': change_pct,
+                    'rsi': rsi,
+                    'vol_ratio': vol_ratio,
+                    'high_52w': high_52w,
+                    'drop_52w': drop_52w
+                })
+            except Exception as e:
+                continue
+    except Exception as e:
+        return []
+    
     return results
 
 def calculate_scores(data, mode):
@@ -97,14 +130,14 @@ def calculate_scores(data, mode):
     return data
 
 st.markdown('<div class="app-container">', unsafe_allow_html=True)
-st.markdown('<div class="header-title">Market Detective 🕵️‍️</div>', unsafe_allow_html=True)
+st.markdown('<div class="header-title">Market Detective 🕵️‍♂️</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 with col1:
     if st.button("⚡ Intraday", use_container_width=True):
         st.session_state.mode = 'intraday'
 with col2:
-    if st.button("📈 Swing Trading", use_container_width=True):
+    if st.button(" Swing Trading", use_container_width=True):
         st.session_state.mode = 'swing'
 
 if 'mode' not in st.session_state:
@@ -114,14 +147,18 @@ current_mode = st.session_state.mode
 if st.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
-with st.spinner("Fetching live market data..."):
+with st.spinner("Fetching live market data... This may take 30-60 seconds..."):
     try:
-        live_data = fetch_live_data(STOCK_UNIVERSE)
-        live_data = calculate_scores(live_data, current_mode)
-        is_live = len(live_data) > 0
-    except:
-        live_data = []
+        live_data = fetch_live_data_yfinance(STOCK_UNIVERSE)
+        if live_data:
+            live_data = calculate_scores(live_data, current_mode)
+            is_live = True
+        else:
+            is_live = False
+            live_data = []
+    except Exception as e:
         is_live = False
+        live_data = []
 
 if is_live:
     st.markdown(f"""
@@ -161,14 +198,14 @@ if current_mode == 'intraday':
                 <span class="stock-name">{s['name']}</span>
                 <span class="stock-price">₹{s['price']:.2f}</span>
             </div>
-            <div class="stock-change {change_class}">{change_sign}{s['change']:.2f}% {'🟢' if s['change']>=0 else '🔴'}</div>
+            <div class="stock-change {change_class}">{change_sign}{s['change']:.2f}% {'🟢' if s['change']>=0 else ''}</div>
             <span class="score-badge score-green">Score: {int(score)}</span>
         </div>
         """, unsafe_allow_html=True)
     if not strong:
         st.markdown('<div class="no-results">No strong momentum setups</div>', unsafe_allow_html=True)
     
-    st.markdown('<div class="section-title">Weak / Bearish Setups ️</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Weak / Bearish Setups ⚠️</div>', unsafe_allow_html=True)
     for s in weak:
         score = s.get('intra_score', 0)
         change_class = 'bullish' if s['change'] >= 0 else 'bearish'
@@ -204,7 +241,7 @@ else:
     if not strong:
         st.markdown('<div class="no-results">No deep value stocks found</div>', unsafe_allow_html=True)
     
-    st.markdown('<div class="section-title">Overbought / Weak 📉</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Overbought / Weak </div>', unsafe_allow_html=True)
     for s in weak:
         score = s.get('swing_score', 0)
         drop_class = 'bullish' if s['drop_52w'] < -30 else 'bearish'
