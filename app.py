@@ -281,59 +281,31 @@ else:
     strong = sorted([s for s in filtered if s.get('swing_score', 0) >= 70], key=lambda x: x.get('swing_score', 0), reverse=True)
     weak = sorted([s for s in filtered if s.get('swing_score', 0) < 50], key=lambda x: x.get('swing_score', 0))
     
-    st.markdown('<div class="section-title">Deep Value + Strong Fundamentals 💎</div>', unsafe_allow_html=True)
-    for s in strong:
-        score = s.get('swing_score', 0)
-        drop_class = 'bullish' if s['drop_52w'] < -30 else 'bearish'
-        
-        # Show fundamental metrics
-        fundamentals_html = f"""
-        <div class="fundamental-metrics">
-            <span class="metric-item">P/E: <span class="metric-value">{s['pe_ratio']:.1f}</span></span>
-            <span class="metric-item">ROE: <span class="metric-value">{s['roe_pct']:.1f}%</span></span>
-            <span class="metric-item">D/E: <span class="metric-value">{s['de_ratio']:.2f}</span></span>
-            <span class="metric-item">Cap: <span class="metric-value">₹{s['market_cap_cr']:.0f}Cr</span></span>
-        </div>
-        """
-        
-        st.markdown(f"""
-        <div class="stock-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="stock-name">{s['name']}</span>
-                <span class="stock-price">₹{s['price']:.2f}</span>
-            </div>
-            <div class="stock-change {drop_class}">{s['drop_52w']:.1f}% from 52W High</div>
-            {fundamentals_html}
-            <div style="display:inline-block;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;color:white;background-color:#10b981;margin-top:8px;">Score: {int(score)}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    if not strong:
-        st.markdown('<div class="no-results">No deep value stocks with strong fundamentals found</div>', unsafe_allow_html=True)
+   st.markdown('<div class="section-title">Deep Value + Strong Fundamentals 💎</div>', unsafe_allow_html=True)
+for s in strong:
+    score = s.get('swing_score', 0)
+    drop_class = 'bullish' if s['drop_52w'] < -30 else 'bearish'
     
-    st.markdown('<div class="section-title">Weak Fundamentals / Overvalued 📉</div>', unsafe_allow_html=True)
-    for s in weak:
-        score = s.get('swing_score', 0)
-        drop_class = 'bullish' if s['drop_52w'] < -30 else 'bearish'
-        
-        fundamentals_html = f"""
-        <div class="fundamental-metrics">
-            <span class="metric-item">P/E: <span class="metric-value">{s['pe_ratio']:.1f}</span></span>
-            <span class="metric-item">ROE: <span class="metric-value">{s['roe_pct']:.1f}%</span></span>
-            <span class="metric-item">D/E: <span class="metric-value">{s['de_ratio']:.2f}</span></span>
+    # Show fundamental metrics
+    fundamentals_html = f"""
+    <div class="fundamental-metrics">
+        <span class="metric-item">P/E: <span class="metric-value">{s['pe_ratio']:.1f}</span></span>
+        <span class="metric-item">ROE: <span class="metric-value">{s['roe_pct']:.1f}%</span></span>
+        <span class="metric-item">D/E: <span class="metric-value">{s['de_ratio']:.2f}</span></span>
+        <span class="metric-item">Cap: <span class="metric-value">₹{s['market_cap_cr']:.0f}Cr</span></span>
+    </div>
+    """
+    
+    st.markdown(f"""
+    <div class="stock-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="stock-name">{s['name']}</span>
+            <span class="stock-price">₹{s['price']:.2f}</span>
         </div>
-        """
-        
-        st.markdown(f"""
-        <div class="stock-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="stock-name">{s['name']}</span>
-                <span class="stock-price">{s['price']:.2f}</span>
-            </div>
-            <div class="stock-change {drop_class}">{s['drop_52w']:.1f}% from 52W High</div>
-            {fundamentals_html}
-            <span style="display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;color:white;background-color:#10b981;margin-top:8px;">Score: {int(score)}</span>
-        </div>
-        """, unsafe_allow_html=True)
-
+        <div class="stock-change {drop_class}">{s['drop_52w']:.1f}% from 52W High</div>
+        {fundamentals_html}
+        <span class="score-badge score-green">Score: {int(score)}</span>
+    </div>
+    """, unsafe_allow_html=True)
 st.markdown('<div class="disclaimer">⚠️ Disclaimer: Educational purpose only. Not financial advice. Verify data before trading.</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
