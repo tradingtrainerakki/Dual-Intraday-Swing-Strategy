@@ -331,7 +331,7 @@ else:
             </div>
             <div class="stock-change {drop_class}">{s['drop_52w']:.1f}% from 52W High</div>
             {fundamentals_html}
-            <span class="score-badge score-red">Score: {int(score)}</span>
+            <span style="display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700;color:white;background-color:#10b981;margin-top:8px;">Score: {int(score)}</span>
         </div>
         """, unsafe_allow_html=True)
 
