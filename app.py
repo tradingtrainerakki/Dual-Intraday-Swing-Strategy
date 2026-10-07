@@ -255,7 +255,7 @@ if current_mode == 'intraday':
                 <span class="stock-price">₹{s['price']:.2f}</span>
             </div>
             <div class="stock-change {change_class}">{change_sign}{s['change']:.2f}% {'🟢' if s['change']>=0 else '🔴'}</div>
-            <span class="score-badge score-green">Score: {int(score)}</span>
+            <div style="display:inline-block;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;color:white;background-color:#10b981;margin-top:8px;">Score: {int(score)}</div>
         </div>
         """, unsafe_allow_html=True)
     if not strong:
