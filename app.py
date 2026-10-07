@@ -128,32 +128,63 @@ def fetch_advanced_data(tickers):
     return results
 
 def calculate_advanced_scores(data, mode):
-    """Calculate scores with both technical and fundamental analysis"""
+    """Calculate scores - BOTH technical AND fundamental must be strong"""
     for stock in data:
         if mode == 'intraday':
-            # Intraday: Only technical
             score = 50
             if stock['change'] > 0: score += 20
             if stock['vol_ratio'] > 1.2: score += 20
             if stock['rsi'] > 55: score += 15
             stock['intra_score'] = min(100, max(0, score))
         else:
-            # Swing: Technical + Fundamental
-            score = 50
+            # Swing: Technical + Fundamental (DONO zaroori)
+            technical_score = 50
+            fundamental_score = 0
             
-            # Technical conditions
-            if stock['drop_52w'] < -40: score += 15  # Deep discount
-            if stock['rsi'] < 45: score += 10  # Oversold
+            # === TECHNICAL CONDITIONS (Must have at least 2) ===
+            tech_conditions_met = 0
             
-            # Fundamental conditions
-            if stock['roe_pct'] > 12: score += 10  # Profitable company
-            if stock['de_ratio'] < 1.5: score += 10  # Safe debt
-            if stock['pe_ratio'] > 0 and stock['pe_ratio'] < 25: score += 10  # Reasonable valuation
-            if stock['market_cap_cr'] > 1000: score += 5  # Decent size
+            if stock['drop_52w'] < -40:
+                technical_score += 15
+                tech_conditions_met += 1
+            elif stock['drop_52w'] < -25:
+                technical_score += 8
+                tech_conditions_met += 1
             
-            stock['swing_score'] = min(100, max(0, score))
+            if stock['rsi'] < 45:
+                technical_score += 10
+                tech_conditions_met += 1
+            elif stock['rsi'] < 55:
+                technical_score += 5
+            
+            # === FUNDAMENTAL CONDITIONS ===
+            fund_conditions_met = 0
+            
+            if stock['roe_pct'] > 12:
+                fundamental_score += 10
+                fund_conditions_met += 1
+            
+            if stock['de_ratio'] < 1.5:
+                fundamental_score += 10
+                fund_conditions_met += 1
+            
+            if 0 < stock['pe_ratio'] < 25:
+                fundamental_score += 10
+                fund_conditions_met += 1
+            
+            if stock['market_cap_cr'] > 1000:
+                fundamental_score += 5
+                fund_conditions_met += 1
+            
+            # === FINAL SCORE with BONUS ===
+            # Agar technical + fundamental DONO strong hain → bonus points
+            if tech_conditions_met >= 2 and fund_conditions_met >= 3:
+                technical_score += 10  # Bonus for dual strength
+            
+            stock['swing_score'] = min(100, max(0, technical_score + fundamental_score))
+            stock['tech_conditions'] = tech_conditions_met
+            stock['fund_conditions'] = fund_conditions_met
     return data
-
 st.markdown('<div class="app-container">', unsafe_allow_html=True)
 st.markdown('<div class="header-title">Market Detective ️‍♂️</div>', unsafe_allow_html=True)
 
