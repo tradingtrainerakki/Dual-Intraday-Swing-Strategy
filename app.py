@@ -163,11 +163,11 @@ with st.spinner("Fetching live market data... This may take 30-60 seconds..."):
 if is_live:
     st.markdown(f"""
     <div class="status-bar">
-        <span><span class="status-dot-live"></span>LIVE DATA | {datetime.now().strftime('%H:%M:%S')}</span>
+        <span><span class="status-dot-live"></span>LIVE DATA | {datetime.now(IST).strftime('%H:%M:%S')}</span>
         <span>Live</span>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown(f'<div class="header-subtitle">Live Market Data | {datetime.now().strftime("%d %b %Y")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="header-subtitle">Live Market Data | {datetime.now(IST).strftime("%d %b %Y")}</div>', unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="status-bar">
