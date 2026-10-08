@@ -36,6 +36,51 @@ if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
 
 # ==================== DATA FETCHING ====================
+# ==================== DYNAMIC FUNDAMENTALS CALCULATOR ====================
+def get_dynamic_fundamentals(ticker):
+    """Har stock ke liye dynamically fundamentals calculate karta hai"""
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    
+    # 1. P/E Ratio
+    pe_ratio = info.get('trailingPE') or info.get('forwardPE') or 0
+    
+    # 2. Industry PE
+    industry_pe = info.get('industryPe') or info.get('industryPE') or 0
+    
+    # 3. Debt to Equity
+    de_ratio = info.get('debtToEquity') or 0
+    de_ratio_final = (de_ratio / 100) if de_ratio and de_ratio > 1 else (de_ratio if de_ratio else 0)
+    
+    # 4. ROE (Return on Equity) - Smart Calculation
+    roe = info.get('returnOnEquity') or 0
+    
+    # Agar yfinance ne ROE nahi diya, toh Balance Sheet se calculate karo
+    if not roe:
+        try:
+            financials = stock.financials
+            balance_sheet = stock.balance_sheet
+            
+            if not financials.empty and not balance_sheet.empty:
+                # Latest year ka Net Income nikalo
+                net_income = financials.loc['Net Income'].iloc[0]
+                
+                # Equity ka column name kabhi-kabhi alag hota hai, usko handle karo
+                equity_col = 'Total Stockholder Equity' if 'Total Stockholder Equity' in balance_sheet.index else 'Stockholders Equity'
+                total_equity = balance_sheet.loc[equity_col].iloc[0]
+                
+                if total_equity > 0:
+                    roe = net_income / total_equity  # Decimal mein aayega
+        except Exception:
+            pass  # Agar financial data na mile, toh 0 hi rahega
+    
+    # ROE ko percentage mein convert karo (agar decimal mein hai toh *100)
+    roe_pct = (roe * 100) if roe and abs(roe) < 1 else (roe if roe else 0)
+    
+    return pe_ratio, industry_pe, roe_pct, de_ratio_final
+
+
+# ==================== DATA FETCHING ====================
 @st.cache_data(ttl=600)
 def fetch_data(tickers):
     results = []
@@ -43,10 +88,8 @@ def fetch_data(tickers):
         try:
             stock = yf.Ticker(ticker)
             
-            # ✅ FIX 1: 3mo ke saath 1y bhi fetch karo 52-week high ke liye
+            # 1. Price & Volume Data (3 months)
             hist = stock.history(period="3mo")
-            hist_1y = stock.history(period="1y")  # 52-week data
-            
             if hist.empty:
                 continue
                 
@@ -56,7 +99,7 @@ def fetch_data(tickers):
             prev_close = closes[-2] if len(closes) > 1 else current_price
             change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
             
-            # RSI calculation (same as before)
+            # 2. RSI Calculation
             rsi = 50
             if len(closes) >= 15:
                 gains, losses = 0, 0
@@ -71,49 +114,33 @@ def fetch_data(tickers):
                     rs = avg_gain / avg_loss
                     rsi = 100 - (100 / (1 + rs))
             
-            # Volume ratio (same)
+            # 3. Volume Ratio
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes) if volumes else 1
             current_vol = volumes[-1] if volumes else 0
             vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
             
-            # ✅ FIX 1 CONTINUED: Actual 52-week high calculation
-            if not hist_1y.empty:
-                high_52w = hist_1y['High'].max()  # 1 saal ka HIGH
-            else:
-                high_52w = max(closes) if closes else current_price
-            
+            # 4. 52-Week High (1 Year Data)
+            hist_1y = stock.history(period="1y")
+            high_52w = hist_1y['High'].max() if not hist_1y.empty else (max(closes) if closes else current_price)
             drop_52w = ((current_price - high_52w) / high_52w * 100) if high_52w > 0 else 0
             
-            # Fundamentals
-            info = stock.info
+            # 5. Dynamic Fundamentals Fetch (No hardcoded dictionary needed!)
+            pe_ratio, industry_pe, roe_pct, de_ratio = get_dynamic_fundamentals(ticker)
             
-            # ✅ FIX 2: Better None handling
-            pe_ratio = info.get('trailingPE')
-            if pe_ratio is None:
-                pe_ratio = info.get('forwardPE', 0) or 0
-            
-            industry_pe = info.get('industryPe') or info.get('industryPE') or 0
-            
-            roe = info.get('returnOnEquity') or 0
-            roe_pct = (roe * 100) if roe and roe < 1 else (roe if roe else 0)
-            
-            de_ratio = info.get('debtToEquity') or 0
-            de_ratio_decimal = (de_ratio / 100) if de_ratio and de_ratio > 1 else (de_ratio if de_ratio else 0)
-            
-            market_cap = info.get('marketCap') or 0
+            market_cap = stock.info.get('marketCap') or 0
             market_cap_cr = market_cap / 10000000 if market_cap else 0
-            industry = info.get('industry', 'N/A')
+            industry = stock.info.get('industry', 'N/A')
             name = ticker.replace('.NS', '')
             
             results.append({
                 'name': name, 'ticker': ticker, 'price': current_price, 'change': change_pct,
                 'rsi': rsi, 'vol_ratio': vol_ratio, 'high_52w': high_52w, 'drop_52w': drop_52w,
                 'pe_ratio': pe_ratio, 'industry_pe': industry_pe, 'roe_pct': roe_pct,
-                'de_ratio': de_ratio_decimal, 'market_cap_cr': market_cap_cr, 'industry': industry
+                'de_ratio': de_ratio, 'market_cap_cr': market_cap_cr, 'industry': industry
             })
-        except Exception as e:
-            print(f"Error fetching {ticker}: {e}")
-            continue
+        except Exception:
+            continue  # Silent fail for individual stocks to keep app running smoothly
+            
     return results
 # ==================== SCORING ====================
 def calc_scores(data, mode):
