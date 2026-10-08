@@ -3,9 +3,9 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import time
 
 IST = ZoneInfo("Asia/Kolkata")
-
 
 st.set_page_config(page_title="Market Detective Pro", page_icon="🕵️‍♂️", layout="wide")
 
@@ -34,8 +34,9 @@ if 'page' not in st.session_state:
     st.session_state.page = 'scanner'
 if 'selected_stock' not in st.session_state:
     st.session_state.selected_stock = None
+if 'run_id' not in st.session_state:
+    st.session_state.run_id = 0
 
-# ==================== DATA FETCHING ====================
 # ==================== DYNAMIC FUNDAMENTALS CALCULATOR ====================
 def get_dynamic_fundamentals(ticker):
     """Har stock ke liye dynamically fundamentals calculate karta hai"""
@@ -45,7 +46,7 @@ def get_dynamic_fundamentals(ticker):
     # 1. P/E Ratio
     pe_ratio = info.get('trailingPE') or info.get('forwardPE') or 0
     
-    # 2. Industry PE
+    # 2. Industry PE (yfinance se, baad mein override hoga)
     industry_pe = info.get('industryPe') or info.get('industryPE') or 0
     
     # 3. Debt to Equity
@@ -62,22 +63,48 @@ def get_dynamic_fundamentals(ticker):
             balance_sheet = stock.balance_sheet
             
             if not financials.empty and not balance_sheet.empty:
-                # Latest year ka Net Income nikalo
                 net_income = financials.loc['Net Income'].iloc[0]
                 
-                # Equity ka column name kabhi-kabhi alag hota hai, usko handle karo
                 equity_col = 'Total Stockholder Equity' if 'Total Stockholder Equity' in balance_sheet.index else 'Stockholders Equity'
                 total_equity = balance_sheet.loc[equity_col].iloc[0]
                 
                 if total_equity > 0:
-                    roe = net_income / total_equity  # Decimal mein aayega
+                    roe = net_income / total_equity
         except Exception:
-            pass  # Agar financial data na mile, toh 0 hi rahega
+            pass
     
-    # ROE ko percentage mein convert karo (agar decimal mein hai toh *100)
     roe_pct = (roe * 100) if roe and abs(roe) < 1 else (roe if roe else 0)
     
     return pe_ratio, industry_pe, roe_pct, de_ratio_final
+
+
+# ==================== INDUSTRY PE CALCULATOR ====================
+def calculate_industry_pe(data):
+    """Apne universe ke stocks ka industry-wise average PE calculate karta hai"""
+    industry_pe_map = {}
+    
+    for stock in data:
+        industry = stock['industry']
+        pe = stock['pe_ratio']
+        
+        if industry != 'N/A' and pe > 0:
+            if industry not in industry_pe_map:
+                industry_pe_map[industry] = {'total_pe': 0, 'count': 0}
+            industry_pe_map[industry]['total_pe'] += pe
+            industry_pe_map[industry]['count'] += 1
+    
+    for industry, values in industry_pe_map.items():
+        if values['count'] > 0:
+            industry_pe_map[industry] = values['total_pe'] / values['count']
+        else:
+            industry_pe_map[industry] = 0
+    
+    for stock in data:
+        industry = stock['industry']
+        if industry in industry_pe_map and industry_pe_map[industry] > 0:
+            stock['industry_pe'] = industry_pe_map[industry]
+    
+    return data
 
 
 # ==================== DATA FETCHING ====================
@@ -124,7 +151,7 @@ def fetch_data(tickers):
             high_52w = hist_1y['High'].max() if not hist_1y.empty else (max(closes) if closes else current_price)
             drop_52w = ((current_price - high_52w) / high_52w * 100) if high_52w > 0 else 0
             
-            # 5. Dynamic Fundamentals Fetch (No hardcoded dictionary needed!)
+            # 5. Dynamic Fundamentals
             pe_ratio, industry_pe, roe_pct, de_ratio = get_dynamic_fundamentals(ticker)
             
             market_cap = stock.info.get('marketCap') or 0
@@ -139,57 +166,12 @@ def fetch_data(tickers):
                 'de_ratio': de_ratio, 'market_cap_cr': market_cap_cr, 'industry': industry
             })
         except Exception:
-            continue  # Silent fail for individual stocks to keep app running smoothly
+            continue
             
     return results
-    # ==================== INDUSTRY PE CALCULATOR ====================
-def calculate_industry_pe(data):
-    """Apne universe ke stocks ka industry-wise average PE calculate karta hai"""
-    industry_pe_map = {}
-    
-    # Pehle har industry ka total PE aur count nikalo
-    for stock in data:
-        industry = stock['industry']
-        pe = stock['pe_ratio']
-        
-        if industry != 'N/A' and pe > 0:  # Sirf valid PE wale stocks
-            if industry not in industry_pe_map:
-                industry_pe_map[industry] = {'total_pe': 0, 'count': 0}
-            industry_pe_map[industry]['total_pe'] += pe
-            industry_pe_map[industry]['count'] += 1
-    
-    # Ab average PE calculate karo
-    for industry, values in industry_pe_map.items():
-        if values['count'] > 0:
-            industry_pe_map[industry] = values['total_pe'] / values['count']
-        else:
-            industry_pe_map[industry] = 0
-    
-    # Ab har stock ka industry_pe update karo
-    for stock in data:
-        industry = stock['industry']
-        if industry in industry_pe_map and industry_pe_map[industry] > 0:
-            stock['industry_pe'] = industry_pe_map[industry]
-    
-    return data
-# ==================== SCORING ====================
-# Fetch Data
-if st.button("🔄 Refresh Live Data", use_container_width=True):
-    st.cache_data.clear()
 
-with st.spinner("Fetching live market data..."):
-    try:
-        live_data = fetch_data(STOCK_UNIVERSE)
-        if live_data:
-            live_data = calculate_industry_pe(live_data)  # ✅ YEH LINE ADD KARO
-            live_data = calc_scores(live_data, st.session_state.mode)
-            is_live = True
-        else:
-            is_live = False
-            live_data = []
-    except:
-        is_live = False
-        live_data = []
+
+# ==================== SCORING ====================
 def calc_scores(data, mode):
     for stock in data:
         if mode == 'intraday':
@@ -222,6 +204,7 @@ def calc_scores(data, mode):
             stock['swing_score'] = min(100, max(0, tech_score + fund_score))
     return data
 
+
 # ==================== PE ANALYSIS ====================
 def pe_analysis(stock):
     pe = stock['pe_ratio']
@@ -237,7 +220,8 @@ def pe_analysis(stock):
     elif pe < ind_pe * 1.2: return "Fair Valued", ""
     else:
         premium = ((pe - ind_pe) / ind_pe) * 100
-        return f"Mehenga ({premium:.0f}% premium)", "🔴"
+        return f"Mehenga ({premium:.0f}% premium)", ""
+
 
 # ==================== STOCK DETAIL PAGE ====================
 def show_stock_detail(stock_name, live_data):
@@ -246,12 +230,13 @@ def show_stock_detail(stock_name, live_data):
         st.error("Stock data not found.")
         return
     
-    st.button("⬅️ Back to Scanner", on_click=lambda: st.session_state.update({'selected_stock': None}))
+    if st.button("⬅️ Back to Scanner", key="back_btn"):
+        st.session_state.selected_stock = None
+        st.rerun()
     
-    st.title(f"🕵️‍️ {stock['name']} - Detailed Analysis")
+    st.title(f"🕵️‍♂️ {stock['name']} - Detailed Analysis")
     st.subheader(f"💰 Current Price: ₹{stock['price']:.2f} ({stock['change']:+.2f}%)")
     
-    # 1. Chart
     st.markdown("### 📈 1 Year Price Chart")
     try:
         hist_data = yf.Ticker(stock['ticker']).history(period="1y")
@@ -262,8 +247,7 @@ def show_stock_detail(stock_name, live_data):
     except:
         st.error("Could not load chart data.")
     
-    # 2. Key Metrics
-    st.markdown("### 📊 Key Fundamentals")
+    st.markdown("###  Key Fundamentals")
     pe_status, pe_emoji = pe_analysis(stock)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -278,7 +262,6 @@ def show_stock_detail(stock_name, live_data):
     
     st.info(f"**Valuation Verdict:** {pe_status}")
     
-    # 3. Peer Comparison
     st.markdown("### 🏭 Peer Comparison (Same Industry)")
     peers = [s for s in live_data if s['industry'] == stock['industry'] and s['name'] != stock['name']]
     if peers:
@@ -287,8 +270,7 @@ def show_stock_detail(stock_name, live_data):
     else:
         st.info("No direct peers found in the current scan list.")
     
-    # 4. Recent News
-    st.markdown("### 📰 Recent News")
+    st.markdown("###  Recent News")
     try:
         news = yf.Ticker(stock['ticker']).news
         if news:
@@ -301,36 +283,39 @@ def show_stock_detail(stock_name, live_data):
     except:
         st.warning("Could not fetch news (Yahoo Finance restriction).")
 
-# ==================== MAIN APP ====================
-st.title("🕵️‍♂️ Market Detective Pro")
 
-# Navigation
+# ==================== MAIN APP ====================
+st.title("️‍♂️ Market Detective Pro")
+
+# Navigation (with unique keys)
 nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
 with nav_col1:
-    if st.button("📊 Scanner", use_container_width=True):
+    if st.button("📊 Scanner", key="nav_scanner", use_container_width=True):
         st.session_state.page = 'scanner'
         st.session_state.selected_stock = None
 with nav_col2:
-    if st.button("⭐ Watchlist", use_container_width=True):
+    if st.button("⭐ Watchlist", key="nav_watchlist", use_container_width=True):
         st.session_state.page = 'watchlist'
         st.session_state.selected_stock = None
 with nav_col3:
-    if st.button("📓 Trade Journal", use_container_width=True):
+    if st.button("📓 Trade Journal", key="nav_journal", use_container_width=True):
         st.session_state.page = 'journal'
         st.session_state.selected_stock = None
 with nav_col4:
-    if st.button("ℹ️ About", use_container_width=True):
+    if st.button("ℹ️ About", key="nav_about", use_container_width=True):
         st.session_state.page = 'about'
         st.session_state.selected_stock = None
 
 # Fetch Data
-if st.button("🔄 Refresh Live Data", use_container_width=True):
+if st.button(" Refresh Live Data", key="refresh_data", use_container_width=True):
     st.cache_data.clear()
+    st.session_state.run_id += 1
 
 with st.spinner("Fetching live market data..."):
     try:
         live_data = fetch_data(STOCK_UNIVERSE)
         if live_data:
+            live_data = calculate_industry_pe(live_data)
             live_data = calc_scores(live_data, st.session_state.mode)
             is_live = True
         else:
@@ -350,23 +335,23 @@ if st.session_state.selected_stock:
     show_stock_detail(st.session_state.selected_stock, live_data)
 
 elif st.session_state.page == 'scanner':
-    st.subheader(" Stock Scanner")
+    st.subheader("📊 Stock Scanner")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("⚡ Intraday Mode", use_container_width=True):
+        if st.button("⚡ Intraday Mode", key="mode_intraday", use_container_width=True):
             st.session_state.mode = 'intraday'
     with col2:
-        if st.button("📈 Swing Trading Mode", use_container_width=True):
+        if st.button("📈 Swing Trading Mode", key="mode_swing", use_container_width=True):
             st.session_state.mode = 'swing'
     
     st.info(f"Current Mode: **{st.session_state.mode.upper()}**")
     
-    search_query = st.text_input("🔍 Search stock...", placeholder="Enter stock name...")
+    search_query = st.text_input("🔍 Search stock...", placeholder="Enter stock name...", key="search_box")
     filtered = [s for s in live_data if search_query.upper() in s['name']] if search_query else live_data
     
     if st.session_state.mode == 'intraday':
         strong = sorted([s for s in filtered if s.get('intra_score', 0) >= 70], key=lambda x: x.get('intra_score', 0), reverse=True)
-        st.subheader(" Top Momentum Setups")
+        st.subheader("🔥 Top Momentum Setups")
         for s in strong:
             col1, col2, col3 = st.columns([2, 2, 1])
             with col1:
@@ -376,7 +361,7 @@ elif st.session_state.page == 'scanner':
                 st.markdown(f"**RSI:** {s['rsi']:.1f} | **Vol:** {s['vol_ratio']:.2f}x")
             with col3:
                 st.markdown(f"### 🎯 {int(s['intra_score'])}")
-                if st.button(f" Details", key=f"det_{s['name']}"):
+                if st.button(f"🔍 Details", key=f"det_{s['name']}_{st.session_state.run_id}"):
                     st.session_state.selected_stock = s['name']
                     st.rerun()
             st.markdown("---")
@@ -395,7 +380,7 @@ elif st.session_state.page == 'scanner':
                 st.markdown(f"**Verdict:** {pe_status}")
             with col3:
                 st.markdown(f"### 🎯 {int(s['swing_score'])}")
-                if st.button(f" Details", key=f"det_{s['name']}"):
+                if st.button(f"🔍 Details", key=f"det_{s['name']}_{st.session_state.run_id}"):
                     st.session_state.selected_stock = s['name']
                     st.rerun()
             st.markdown("---")
@@ -417,10 +402,10 @@ elif st.session_state.page == 'watchlist':
                     st.markdown(f"**P/E:** {stock['pe_ratio']:.1f} {pe_emoji} | **ROE:** {stock['roe_pct']:.1f}%")
                     st.markdown(f"**Verdict:** {pe_status}")
                 with col3:
-                    if st.button(f"🔍 Details", key=f"wdet_{stock['name']}"):
+                    if st.button(f"🔍 Details", key=f"wdet_{stock['name']}_{st.session_state.run_id}"):
                         st.session_state.selected_stock = stock['name']
                         st.rerun()
-                    if st.button(f"❌ Remove", key=f"wrem_{stock['name']}"):
+                    if st.button(f"❌ Remove", key=f"wrem_{stock['name']}_{st.session_state.run_id}"):
                         st.session_state.watchlist.remove(stock['name'])
                         st.rerun()
                 st.markdown("---")
@@ -467,12 +452,12 @@ elif st.session_state.page == 'journal':
         c2.metric("Win Rate", f"{win_rate:.1f}%")
         c3.metric("Total P&L", f"₹{total_pnl:.2f}")
         
-        st.subheader("📋 Trade History")
+        st.subheader(" Trade History")
         for t in reversed(st.session_state.trades):
             st.markdown(f"**{t['stock']}** ({t['setup']}) - {t['date']} | P&L: ₹{t['pnl']:.2f} | Status: {t['status']}")
 
 elif st.session_state.page == 'about':
-    st.subheader("ℹ️ About Market Detective Pro")
+    st.subheader("️ About Market Detective Pro")
     st.markdown("""
     **Features:**
     - 🔍 **Scanner:** 50+ stocks scan (Technical + Fundamental)
