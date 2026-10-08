@@ -142,7 +142,54 @@ def fetch_data(tickers):
             continue  # Silent fail for individual stocks to keep app running smoothly
             
     return results
+    # ==================== INDUSTRY PE CALCULATOR ====================
+def calculate_industry_pe(data):
+    """Apne universe ke stocks ka industry-wise average PE calculate karta hai"""
+    industry_pe_map = {}
+    
+    # Pehle har industry ka total PE aur count nikalo
+    for stock in data:
+        industry = stock['industry']
+        pe = stock['pe_ratio']
+        
+        if industry != 'N/A' and pe > 0:  # Sirf valid PE wale stocks
+            if industry not in industry_pe_map:
+                industry_pe_map[industry] = {'total_pe': 0, 'count': 0}
+            industry_pe_map[industry]['total_pe'] += pe
+            industry_pe_map[industry]['count'] += 1
+    
+    # Ab average PE calculate karo
+    for industry, values in industry_pe_map.items():
+        if values['count'] > 0:
+            industry_pe_map[industry] = values['total_pe'] / values['count']
+        else:
+            industry_pe_map[industry] = 0
+    
+    # Ab har stock ka industry_pe update karo
+    for stock in data:
+        industry = stock['industry']
+        if industry in industry_pe_map and industry_pe_map[industry] > 0:
+            stock['industry_pe'] = industry_pe_map[industry]
+    
+    return data
 # ==================== SCORING ====================
+# Fetch Data
+if st.button("🔄 Refresh Live Data", use_container_width=True):
+    st.cache_data.clear()
+
+with st.spinner("Fetching live market data..."):
+    try:
+        live_data = fetch_data(STOCK_UNIVERSE)
+        if live_data:
+            live_data = calculate_industry_pe(live_data)  # ✅ YEH LINE ADD KARO
+            live_data = calc_scores(live_data, st.session_state.mode)
+            is_live = True
+        else:
+            is_live = False
+            live_data = []
+    except:
+        is_live = False
+        live_data = []
 def calc_scores(data, mode):
     for stock in data:
         if mode == 'intraday':
