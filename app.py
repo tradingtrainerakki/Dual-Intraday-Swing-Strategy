@@ -42,15 +42,21 @@ def fetch_data(tickers):
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
+            
+            # ✅ FIX 1: 3mo ke saath 1y bhi fetch karo 52-week high ke liye
             hist = stock.history(period="3mo")
+            hist_1y = stock.history(period="1y")  # 52-week data
+            
             if hist.empty:
                 continue
+                
             closes = hist['Close'].tolist()
             volumes = hist['Volume'].tolist()
             current_price = closes[-1] if closes else 0
             prev_close = closes[-2] if len(closes) > 1 else current_price
             change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
             
+            # RSI calculation (same as before)
             rsi = 50
             if len(closes) >= 15:
                 gains, losses = 0, 0
@@ -65,21 +71,36 @@ def fetch_data(tickers):
                     rs = avg_gain / avg_loss
                     rsi = 100 - (100 / (1 + rs))
             
+            # Volume ratio (same)
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes) if volumes else 1
             current_vol = volumes[-1] if volumes else 0
             vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
             
-            high_52w = max(closes) if closes else current_price
+            # ✅ FIX 1 CONTINUED: Actual 52-week high calculation
+            if not hist_1y.empty:
+                high_52w = hist_1y['High'].max()  # 1 saal ka HIGH
+            else:
+                high_52w = max(closes) if closes else current_price
+            
             drop_52w = ((current_price - high_52w) / high_52w * 100) if high_52w > 0 else 0
             
+            # Fundamentals
             info = stock.info
-            pe_ratio = info.get('trailingPE', 0) or 0
-            industry_pe = info.get('industryPe', 0) or info.get('industryPE', 0) or 0
-            roe = info.get('returnOnEquity', 0) or 0
-            roe_pct = roe * 100 if roe else 0
-            de_ratio = info.get('debtToEquity', 0) or 0
-            de_ratio_decimal = de_ratio / 100 if de_ratio > 1 else de_ratio
-            market_cap = info.get('marketCap', 0) or 0
+            
+            # ✅ FIX 2: Better None handling
+            pe_ratio = info.get('trailingPE')
+            if pe_ratio is None:
+                pe_ratio = info.get('forwardPE', 0) or 0
+            
+            industry_pe = info.get('industryPe') or info.get('industryPE') or 0
+            
+            roe = info.get('returnOnEquity') or 0
+            roe_pct = (roe * 100) if roe and roe < 1 else (roe if roe else 0)
+            
+            de_ratio = info.get('debtToEquity') or 0
+            de_ratio_decimal = (de_ratio / 100) if de_ratio and de_ratio > 1 else (de_ratio if de_ratio else 0)
+            
+            market_cap = info.get('marketCap') or 0
             market_cap_cr = market_cap / 10000000 if market_cap else 0
             industry = info.get('industry', 'N/A')
             name = ticker.replace('.NS', '')
@@ -91,9 +112,9 @@ def fetch_data(tickers):
                 'de_ratio': de_ratio_decimal, 'market_cap_cr': market_cap_cr, 'industry': industry
             })
         except Exception as e:
+            print(f"Error fetching {ticker}: {e}")
             continue
     return results
-
 # ==================== SCORING ====================
 def calc_scores(data, mode):
     for stock in data:
