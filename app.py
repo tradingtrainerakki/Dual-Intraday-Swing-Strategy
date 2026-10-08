@@ -38,13 +38,32 @@ if 'run_id' not in st.session_state:
     st.session_state.run_id = 0
 
 # ==================== DYNAMIC FUNDAMENTALS CALCULATOR ====================
-def get_dynamic_fundamentals(ticker):
+def get_dynamic_fundamentals(ticker, current_price):
     """Har stock ke liye dynamically fundamentals calculate karta hai"""
     stock = yf.Ticker(ticker)
     info = stock.info
     
-    # 1. P/E Ratio
-    pe_ratio = info.get('trailingPE') or info.get('forwardPE') or 0
+    # 1. P/E Ratio - Multiple fallback methods
+    pe_ratio = info.get('trailingPE') or 0
+    if pe_ratio == 0:
+        pe_ratio = info.get('forwardPE') or 0
+    # Agar phir bhi 0 hai, toh EPS se calculate karo
+    if pe_ratio == 0:
+        eps = info.get('trailingEps') or info.get('forwardEps') or 0
+        if eps and eps > 0 and current_price > 0:
+            pe_ratio = current_price / eps
+    # Last fallback: Financials se
+    if pe_ratio == 0:
+        try:
+            financials = stock.financials
+            if not financials.empty:
+                net_income = financials.loc['Net Income'].iloc[0]
+                shares = info.get('sharesOutstanding') or 0
+                if net_income > 0 and shares > 0:
+                    eps_calc = net_income / shares
+                    pe_ratio = current_price / eps_calc
+        except Exception:
+            pass
     
     # 2. Industry PE (yfinance se, baad mein override hoga)
     industry_pe = info.get('industryPe') or info.get('industryPE') or 0
@@ -56,7 +75,6 @@ def get_dynamic_fundamentals(ticker):
     # 4. ROE (Return on Equity) - Smart Calculation
     roe = info.get('returnOnEquity') or 0
     
-    # Agar yfinance ne ROE nahi diya, toh Balance Sheet se calculate karo
     if not roe:
         try:
             financials = stock.financials
@@ -79,6 +97,38 @@ def get_dynamic_fundamentals(ticker):
 
 
 # ==================== INDUSTRY PE CALCULATOR ====================
+# Industry-wise typical PE ranges (fallback jab universe mein data na ho)
+INDUSTRY_PE_FALLBACK = {
+    'Information Technology Services': 28.0,
+    'Software - Infrastructure': 30.0,
+    'Banks - Regional': 15.0,
+    'Banks - Diversified': 18.0,
+    'Oil & Gas Integrated': 22.0,
+    'Oil & Gas E&P': 18.0,
+    'Oil & Gas Refining & Marketing': 15.0,
+    'Auto Manufacturers': 25.0,
+    'Auto Parts': 20.0,
+    'Steel': 12.0,
+    'Specialty Industrial Machinery': 28.0,
+    'Aerospace & Defense': 30.0,
+    'Utilities - Regulated Electric': 18.0,
+    'Utilities - Renewable': 25.0,
+    'Telecom Services': 20.0,
+    'Internet Retail': 40.0,
+    'Restaurants': 35.0,
+    'Luxury Goods': 55.0,
+    'Household & Personal Products': 45.0,
+    'Drug Manufacturers - General': 35.0,
+    'Financial Data & Stock Exchanges': 35.0,
+    'Credit Services': 30.0,
+    'Conglomerates': 25.0,
+    'Engineering & Construction': 22.0,
+    'Railroads': 20.0,
+    'Specialty Chemicals': 25.0,
+    'Renewable Energy': 30.0,
+    'Electrical Equipment & Parts': 25.0,
+}
+
 def calculate_industry_pe(data):
     """Apne universe ke stocks ka industry-wise average PE calculate karta hai"""
     industry_pe_map = {}
@@ -93,19 +143,22 @@ def calculate_industry_pe(data):
             industry_pe_map[industry]['total_pe'] += pe
             industry_pe_map[industry]['count'] += 1
     
+    # Average PE calculate karo
     for industry, values in industry_pe_map.items():
         if values['count'] > 0:
             industry_pe_map[industry] = values['total_pe'] / values['count']
-        else:
-            industry_pe_map[industry] = 0
     
+    # Har stock ka industry_pe update karo (fallback ke saath)
     for stock in data:
         industry = stock['industry']
         if industry in industry_pe_map and industry_pe_map[industry] > 0:
             stock['industry_pe'] = industry_pe_map[industry]
+        elif industry in INDUSTRY_PE_FALLBACK:
+            stock['industry_pe'] = INDUSTRY_PE_FALLBACK[industry]
+        elif stock['industry_pe'] == 0:
+            stock['industry_pe'] = 20.0  # Default market average
     
     return data
-
 
 # ==================== DATA FETCHING ====================
 @st.cache_data(ttl=600)
@@ -152,7 +205,7 @@ def fetch_data(tickers):
             drop_52w = ((current_price - high_52w) / high_52w * 100) if high_52w > 0 else 0
             
             # 5. Dynamic Fundamentals
-            pe_ratio, industry_pe, roe_pct, de_ratio = get_dynamic_fundamentals(ticker)
+            pe_ratio, industry_pe, roe_pct, de_ratio = get_dynamic_fundamentals(ticker, current_price)
             
             market_cap = stock.info.get('marketCap') or 0
             market_cap_cr = market_cap / 10000000 if market_cap else 0
